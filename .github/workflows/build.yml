@@ -24,14 +24,15 @@ jobs:
       - name: Create Android platform files if missing
         run: flutter create --platforms=android --project-name dark_gpt --org com.darkgpt .
 
-      - name: Add audio package
-        run: grep -q audioplayers pubspec.yaml || flutter pub add audioplayers
+      - name: Add dependencies
+        run: |
+          flutter pub add dio archive file_picker share_plus flutter_secure_storage shared_preferences path_provider uuid audioplayers llama_flutter_android
 
       - name: Android settings (internet permission, minSdk)
         run: |
           M=android/app/src/main/AndroidManifest.xml
           grep -q 'android.permission.INTERNET' $M || sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' $M
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle* || true
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 26/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 26/' android/app/build.gradle* || true
 
       - run: flutter pub get
 
