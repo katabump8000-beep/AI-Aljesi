@@ -26,7 +26,7 @@ jobs:
 
       - name: Add dependencies
         run: |
-          flutter pub add dio archive file_picker share_plus flutter_secure_storage shared_preferences path_provider uuid audioplayers llama_flutter_android
+          flutter pub add dio archive file_picker:^8.3.7 share_plus flutter_secure_storage shared_preferences path_provider uuid audioplayers llama_flutter_android
 
       - name: Android settings (internet permission, minSdk)
         run: |
