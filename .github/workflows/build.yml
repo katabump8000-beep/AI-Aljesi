@@ -26,13 +26,26 @@ jobs:
 
       - name: Add dependencies
         run: |
-          flutter pub add dio archive file_picker:^8.3.7 share_plus flutter_secure_storage shared_preferences path_provider uuid audioplayers llama_flutter_android
+          flutter pub add dio archive file_picker:^10.3.10 share_plus flutter_secure_storage shared_preferences path_provider uuid audioplayers llama_flutter_android
 
       - name: Android settings (internet permission, minSdk)
         run: |
           M=android/app/src/main/AndroidManifest.xml
           grep -q 'android.permission.INTERNET' $M || sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' $M
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 26/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 26/' android/app/build.gradle* || true
+
+      - name: Force compileSdk 36 for all plugins
+        run: |
+          mkdir -p $HOME/.gradle/init.d
+          cat > $HOME/.gradle/init.d/force-compilesdk.gradle <<'EOF'
+          allprojects {
+            afterEvaluate { p ->
+              if (p.plugins.hasPlugin('com.android.library')) {
+                p.android.compileSdkVersion(36)
+              }
+            }
+          }
+          EOF
 
       - run: flutter pub get
 
