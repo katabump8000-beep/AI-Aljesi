@@ -6,7 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
-import 'package:flutter_local_llm/flutter_local_llm.dart';
+import 'package:llama_flutter_android/llama_flutter_android.dart';
 
 const appName = 'Dark GPT';
 const redColorValue = 0xFFD52D3A;
@@ -171,35 +171,32 @@ class ApiChat {
 }
 
 class LocalEngine {
-  LocalLlmEngine? engine;
-  LlmSession? session;
+  LlamaController? controller;
   String? loadedPath;
   Future<void> load(String path) async {
     await unload();
-    engine=await LocalLlmEngine.loadModel(
-      modelPath:path,
-      params: const ModelParams(contextSize:2048,gpuLayers:0),
-    );
-    session=engine!.createSession(defaultTemplate: const ChatMlTemplate());
+    final c=LlamaController();
+    await c.loadModel(modelPath:path,threads:4,contextSize:2048);
+    controller=c;
     loadedPath=path;
   }
   Future<String> send(List<ChatLine> history,String prompt) async {
-    final s=session;
-    if(s==null) throw Exception('لم يتم تحميل نموذج محلي بعد.');
-    final msgs=<dynamic>[
-      ChatMessage.system('You are Dark GPT, a helpful assistant. Answer in the same language as the user.'),
-      ...history.map((m)=>m.role=='assistant'?ChatMessage.assistant(m.text):ChatMessage.user(m.text)),
-      ChatMessage.user(prompt),
+    final c=controller;
+    if(c==null) throw Exception('لم يتم تحميل نموذج محلي بعد.');
+    final msgs=<ChatMessage>[
+      ChatMessage(role:'system',content:'You are Dark GPT, a helpful assistant. Answer in the same language as the user.'),
+      ...history.map((m)=>ChatMessage(role:m.role=='assistant'?'assistant':'user',content:m.text)),
+      ChatMessage(role:'user',content:prompt),
     ];
     final out=StringBuffer();
-    await for(final token in s.chat(msgs.cast<ChatMessage>(),params:const SamplingParams(temperature:0.7,topP:0.9,maxTokens:768))) {
+    await for(final token in c.generateChat(messages:msgs,temperature:0.7,topP:0.9,maxTokens:768)) {
       out.write(token);
     }
     return out.toString();
   }
   Future<void> unload() async {
-    session?.dispose(); session=null;
-    engine?.dispose(); engine=null;
+    try { await controller?.dispose(); } catch(_) {}
+    controller=null;
     loadedPath=null;
   }
 }
