@@ -87,7 +87,8 @@ class _MainShellState extends State<MainShell> {
 
 class _Att {
   final String name, kind;
-  const _Att(this.name, this.kind);
+  final String? content;
+  const _Att(this.name, this.kind, [this.content]);
   String get label => kind != 'image' && kind != 'audio' ? name : '$name (غير مدعوم بعد)';
 }
 
@@ -151,6 +152,9 @@ class _ChatScreenState extends State<ChatScreen> {
   String mode = 'local';
   ChatLine? replyTo;
   int _gen = 0;
+  int _prevLen = 0;
+  static const int _fileWords = 120;
+  int _words(String s) => RegExp(r'\S+').allMatches(s).length;
 
   @override
   void initState() {
@@ -210,7 +214,6 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final r = await FilePicker.platform.pickFiles(type: type, allowMultiple: true, withData: kind == 'file');
       if (r == null) return;
-      final snippets = <String>[];
       for (final f in r.files) {
         if (kind != 'file') {
           attached.add(_Att(f.name, kind));
@@ -221,13 +224,11 @@ class _ChatScreenState extends State<ChatScreen> {
         if (bytes == null) continue;
         if (['txt', 'md', 'json', 'csv', 'dart', 'yaml', 'yml', 'xml', 'html', 'css', 'js', 'py', 'java', 'kt', 'sql'].contains(ext)) {
           final text = utf8.decode(bytes, allowMalformed: true);
-          snippets.add('[FILE: ${f.name}]\n${text.length > 18000 ? text.substring(0, 18000) : text}\n[/FILE]');
-          attached.add(_Att(f.name, 'file'));
+          attached.add(_Att(f.name, 'file', text.length > 18000 ? text.substring(0, 18000) : text));
         } else {
           attached.add(_Att('${f.name} (استخراج نص هذا النوع غير مدعوم)', 'other'));
         }
       }
-      if (snippets.isNotEmpty) input.text = '${input.text}\n\n${snippets.join('\n\n')}';
       if (kind != 'file' && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الإرفاق، لكن النموذج الحالي نصي فقط ولن يرى الصورة أو الصوت.')));
       }
@@ -237,11 +238,36 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _onInputChanged(String v) {
+    final jump = v.length - _prevLen;
+    _prevLen = v.length;
+    // لصق نص طويل مباشرة: يتحول إلى ملف txt
+    if (jump >= 60 && _words(v) > _fileWords) {
+      _toFile(v);
+    }
+  }
+
+  void _toFile(String text) {
+    final n = attached.where((a) => a.content != null).length + 1;
+    attached.add(_Att('text_$n.txt', 'file', text.trim()));
+    input.clear();
+    _prevLen = 0;
+    if (mounted) setState(() {});
+  }
+
   Future<void> _send() async {
-    final text = input.text.trim();
-    if (text.isEmpty || busy) return;
-    var prompt = text;
-    if (replyTo != null) prompt = '> ${_short(replyTo!.text)}\n\n$text';
+    if (busy) return;
+    var text = input.text.trim();
+    // كتابة نص طويل ثم إرسال: يتحول إلى ملف txt
+    if (text.isNotEmpty && _words(text) > _fileWords) {
+      final n = attached.where((a) => a.content != null).length + 1;
+      attached.add(_Att('text_$n.txt', 'file', text));
+      text = '';
+    }
+    final blocks = attached.where((a) => a.content != null).map((a) => '[FILE: ${a.name}]\n${a.content}\n[/FILE]').toList();
+    if (text.isEmpty && blocks.isEmpty) return;
+    var prompt = [if (text.isNotEmpty) text, ...blocks].join('\n\n');
+    if (replyTo != null) prompt = '> ${_short(replyTo!.text)}\n\n$prompt';
     final history = List<ChatLine>.from(lines);
     setState(() {
       lines.add(ChatLine('user', prompt, DateTime.now()));
@@ -249,6 +275,7 @@ class _ChatScreenState extends State<ChatScreen> {
       attached.clear();
     });
     input.clear();
+    _prevLen = 0;
     Sfx.send();
     await _generate(prompt, history);
   }
@@ -475,6 +502,73 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
+  Widget _content(String t) {
+    final re = RegExp(r'\[FILE: (.*?)\]\n([\s\S]*?)\n\[/FILE\]');
+    final ms = re.allMatches(t).toList();
+    if (ms.isEmpty) return Text(t, style: const TextStyle(height: 1.5));
+    final rest = t.replaceAll(re, '').trim();
+    final kids = <Widget>[];
+    if (rest.isNotEmpty) kids.add(Text(rest, style: const TextStyle(height: 1.5)));
+    for (final m in ms) {
+      if (kids.isNotEmpty) kids.add(const SizedBox(height: 8));
+      kids.add(_fileCard(m.group(1) ?? 'file.txt', m.group(2) ?? ''));
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: kids);
+  }
+
+  Widget _fileCard(String name, String body) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _openFile(name, body),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white24)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.description_outlined, size: 22),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text('${_words(body)} كلمة', style: const TextStyle(fontSize: 11, color: Colors.white70)),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _openFile(String name, String body) async {
+    await showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(name, style: const TextStyle(fontSize: 16)),
+        content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: SelectableText(body))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('إغلاق')),
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: body));
+              if (c.mounted) Navigator.pop(c);
+            },
+            child: const Text('نسخ'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              try {
+                final f = await FileTools.createText(name, body);
+                await Share.shareXFiles([XFile(f.path)]);
+              } catch (e, st) {
+                await _error('File share', 'تعذر مشاركة الملف', e, st);
+              }
+              if (c.mounted) Navigator.pop(c);
+            },
+            child: const Text('مشاركة / تنزيل'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _bubble(int i) {
     final m = lines[i];
     final user = m.role == 'user';
@@ -493,7 +587,7 @@ class _ChatScreenState extends State<ChatScreen> {
             border: user ? null : Border.all(color: kCyan.withValues(alpha: 0.25)),
             boxShadow: [BoxShadow(color: (user ? kPink : kCyan).withValues(alpha: 0.12), blurRadius: 12)],
           ),
-          child: Text(m.text, style: const TextStyle(height: 1.5)),
+          child: _content(m.text),
         ),
       ),
     );
@@ -575,6 +669,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Expanded(
               child: TextField(
                 controller: input,
+                onChanged: _onInputChanged,
                 minLines: 1,
                 maxLines: 5,
                 decoration: const InputDecoration(hintText: 'اكتب رسالتك إلى Dark GPT...', contentPadding: EdgeInsets.all(14)),
